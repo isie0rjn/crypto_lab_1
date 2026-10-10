@@ -2,10 +2,11 @@
 #include <string.h>
 #include <stdio.h>
 
-char *CSR_encrypt(char message[]);
-char *CSR_decrypt(char cipher[]);
+#include "csr.h"
 
 int main(int argc, char *argv[]) {
+    int answ = 0;
+
     if (argc == 1) {
         printf("No message and key provided.");
         return 1;
@@ -22,9 +23,17 @@ int main(int argc, char *argv[]) {
     }
     if (argc == 3) {
         if (strcmp(argv[1], "-Ecsr") == 0) {
-            printf("%s", CSR_encrypt(argv[2]));
+            printf("key: ");
+            scanf("%d", &answ);
+            char out[255];
+            CSR_encrypt(argv[2], answ, out);
+            printf("%s with key %d", out, answ);
         } else if (strcmp(argv[1], "-Dcsr") == 0) {
-            printf("%s", CSR_decrypt(argv[2]));
+            printf("key: ");
+            scanf("%d", &answ);
+            char out[255];
+            CSR_decrypt(argv[2], answ, out);
+            printf("%s with key %d", out, answ);
         } else {
             printf("No such option.");
             return 1;
@@ -34,10 +43,3 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-char *CSR_encrypt(char message[]) {
-    return "Caesar encrypt of message ";
-}
-
-char *CSR_decrypt(char cipher[]) {
-    return "Caesar decrypt of message";
-}
