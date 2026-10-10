@@ -11,5 +11,5 @@ add_executable(crypto_lab_1
         .idea/modules.xml
         .idea/vcs.xml
         .idea/workspace.xml
-        main.c
+        src/main.c
         README.md)
