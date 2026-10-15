@@ -2,49 +2,70 @@
 
 #include <string.h>
 
+#include "util.h"
 #include "vars.h"
 
-static int mod(int a, int n) {
-    int r = a % n;
-    return (r < 0) ? r + n : r;
-}
+char *CSR_encrypt(const char *message, int key, char *out) {
+    int len = (int) strlen(letters);
+    size_t i;
 
-void CSR_encrypt(const char *message, int key, char *out) {
-    size_t message_len = strlen(message);
-    size_t letters_len = strlen(letters);
-
-    for (size_t i = 0; i < message_len; i++) {
-        out[i] = message[i];
-        for (size_t j = 0; j < letters_len; j++) {
-            if (message[i] == letters[j]) {
-                out[i] = letters[mod((int) j + key, (int) letters_len)];
-                break;
-            }
+    key = mod_int(key, len);
+    for (i = 0; message[i] != '\0'; i++) {
+        int index = alpha_index(letters, message[i]);
+        if (index < 0) {
+            out[i] = message[i];
+            continue;
         }
+        /* сдвиг вышел за конец алфавита - заходим с начала */
+        if (index + key < len)
+            out[i] = letters[index + key];
+        else
+            out[i] = letters[index + key - len];
     }
-    out[message_len] = '\0';
+    out[i] = '\0';
+    return out;
 }
 
-void CSR_decrypt(const char *message, int key, char *out) {
-    size_t message_len = strlen(message);
-    size_t letters_len = strlen(letters);
+char *CSR_decrypt(const char *message, int key, char *out) {
+    int len = (int) strlen(letters);
+    size_t i;
 
-    for (size_t i = 0; i < message_len; i++) {
-        out[i] = message[i];
-        for (size_t j = 0; j < letters_len; j++) {
-            if (message[i] == letters[j]) {
-                out[i] = letters[mod((int) j - key, (int) letters_len)];
-                break;
-            }
+    key = mod_int(key, len);
+    for (i = 0; message[i] != '\0'; i++) {
+        int index = alpha_index(letters, message[i]);
+        if (index < 0) {
+            out[i] = message[i];
+            continue;
         }
+        if (index - key >= 0)
+            out[i] = letters[index - key];
+        else
+            out[i] = letters[index - key + len];
     }
-    out[message_len] = '\0';
+    out[i] = '\0';
+    return out;
 }
 
-void CSR_enc_math(const char *message, int key, char *out) {
-    CSR_encrypt(message, key, out);
+char *CSR_enc_math(const char *message, int key, char *out) {
+    int len = (int) strlen(letters);
+    size_t i;
+
+    for (i = 0; message[i] != '\0'; i++) {
+        int index = alpha_index(letters, message[i]);
+        out[i] = (index < 0) ? message[i] : letters[mod_int(index + key, len)];
+    }
+    out[i] = '\0';
+    return out;
 }
 
-void CSR_dec_math(const char *message, int key, char *out) {
-    CSR_decrypt(message, key, out);
+char *CSR_dec_math(const char *message, int key, char *out) {
+    int len = (int) strlen(letters);
+    size_t i;
+
+    for (i = 0; message[i] != '\0'; i++) {
+        int index = alpha_index(letters, message[i]);
+        out[i] = (index < 0) ? message[i] : letters[mod_int(index - key, len)];
+    }
+    out[i] = '\0';
+    return out;
 }

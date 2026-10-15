@@ -13,5 +13,7 @@ target_include_directories(util PUBLIC include)
 add_executable(crypto
         src/main.c
         src/vars.c
-        src/csr.c)
+        src/csr.c
+        src/csk.c
+        src/vgn.c)
 target_link_libraries(crypto PRIVATE util)

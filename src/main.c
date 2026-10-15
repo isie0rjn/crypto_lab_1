@@ -12,9 +12,11 @@
 #include <unistd.h>
 #endif
 
+#include "csk.h"
 #include "csr.h"
 #include "util.h"
 #include "vars.h"
+#include "vgn.h"
 
 enum {
     EXIT_ILLEGAL = 1,
@@ -28,7 +30,9 @@ enum {
 static char prog[64] = "crypto";
 
 static const char *const msg_options[] = {
-    "-Ecsr", "-Dcsr", "-Ecsrm", "-Dcsrm"
+    "-Ecsr", "-Dcsr", "-Ecsrm", "-Dcsrm",
+    "-Ecsk", "-Dcsk", "-Ecskx", "-Dcskx",
+    "-Evgn", "-Dvgn", "-Evgnx", "-Dvgnx"
 };
 
 struct multi_option {
@@ -108,6 +112,10 @@ static void usage(void) {
     printf("usage: %s OPTION ARGS...\n"
            "  -Ecsr  | -Dcsr  MESSAGE      Caesar, table method\n"
            "  -Ecsrm | -Dcsrm MESSAGE      Caesar, math method\n"
+           "  -Ecsk  | -Dcsk  MESSAGE      Caesar with keyword, A-Z\n"
+           "  -Ecskx | -Dcskx MESSAGE      Caesar with keyword, A-Z a-z 0-9\n"
+           "  -Evgn  | -Dvgn  MESSAGE      Vigenere, A-Z\n"
+           "  -Evgnx | -Dvgnx MESSAGE      Vigenere, A-Z a-z 0-9 and signs\n"
            "  -h, --help                   this text\n"
            "keys are read from stdin after the prompt 'key: '\n",
            prog);
@@ -128,9 +136,18 @@ static int read_shift_key(int *key) {
     return 0;
 }
 
+static int read_word_key(char *key, size_t size, int (*check)(const char *, int), int extended) {
+    if (read_line("key: ", key, size) != 0 || key[0] == '\0')
+        return fail(EXIT_NUMBER, "no key given");
+    if (check(key, extended) != 0)
+        return fail(EXIT_NUMBER, "invalid key: %s (characters outside the alphabet)", key);
+    return 0;
+}
+
 static int run_message(const char *option, const char *message) {
     size_t out_size = strlen(message) + 1;
     char *out = malloc(out_size);
+    char key[256];
     int rc = 0;
     int shift;
 
@@ -150,6 +167,28 @@ static int run_message(const char *option, const char *message) {
                 CSR_dec_math(message, shift, out);
             else
                 CSR_decrypt(message, shift, out);
+            printf("%s: %s\n", encrypt ? "enc" : "dec", out);
+        }
+    } else if (strcmp(option, "-Ecsk") == 0 || strcmp(option, "-Dcsk") == 0
+               || strcmp(option, "-Ecskx") == 0 || strcmp(option, "-Dcskx") == 0) {
+        int encrypt = option[1] == 'E';
+        int extended = option[5] == 'x';
+        if ((rc = read_word_key(key, sizeof key, CSK_check_key, extended)) == 0) {
+            if (encrypt)
+                CSK_encrypt(message, key, extended, out);
+            else
+                CSK_decrypt(message, key, extended, out);
+            printf("%s: %s\n", encrypt ? "enc" : "dec", out);
+        }
+    } else if (strcmp(option, "-Evgn") == 0 || strcmp(option, "-Dvgn") == 0
+               || strcmp(option, "-Evgnx") == 0 || strcmp(option, "-Dvgnx") == 0) {
+        int encrypt = option[1] == 'E';
+        int extended = option[5] == 'x';
+        if ((rc = read_word_key(key, sizeof key, VGN_check_key, extended)) == 0) {
+            if (encrypt)
+                VGN_encrypt(message, key, extended, out);
+            else
+                VGN_decrypt(message, key, extended, out);
             printf("%s: %s\n", encrypt ? "enc" : "dec", out);
         }
     }
