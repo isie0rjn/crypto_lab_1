@@ -1,15 +1,14 @@
-cmake_minimum_required(VERSION 4.1)
-project(crypto_lab_1)
+cmake_minimum_required(VERSION 3.16)
+project(crypto_lab_1 C)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_executable(crypto_lab_1
-        .idea/.gitignore
-        .idea/c_cpp_properties.json
-        .idea/crypto_lab_1.iml
-        .idea/editor.xml
-        .idea/modules.xml
-        .idea/vcs.xml
-        .idea/workspace.xml
+add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+add_compile_options(-Wall -Wextra)
+
+add_executable(crypto
         src/main.c
-        README.md)
+        src/vars.c
+        src/csr.c)
+target_include_directories(crypto PRIVATE include)

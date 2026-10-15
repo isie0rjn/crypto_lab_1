@@ -1,10 +1,5 @@
-//
-// Created by Владимир on 10.10.2026.
-//
-
 #include "csr.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "vars.h"
@@ -18,10 +13,11 @@ void CSR_encrypt(const char *message, int key, char *out) {
     size_t message_len = strlen(message);
     size_t letters_len = strlen(letters);
 
-    for (int i = 0; i < message_len; i++) {
-        for (int j = 0; j < letters_len; j++) {
+    for (size_t i = 0; i < message_len; i++) {
+        out[i] = message[i];
+        for (size_t j = 0; j < letters_len; j++) {
             if (message[i] == letters[j]) {
-                out[i] = letters[mod((j + key), (int) letters_len)];
+                out[i] = letters[mod((int) j + key, (int) letters_len)];
                 break;
             }
         }
@@ -33,10 +29,11 @@ void CSR_decrypt(const char *message, int key, char *out) {
     size_t message_len = strlen(message);
     size_t letters_len = strlen(letters);
 
-    for (int i = 0; i < message_len; i++) {
-        for (int j = 0; j < letters_len; j++) {
+    for (size_t i = 0; i < message_len; i++) {
+        out[i] = message[i];
+        for (size_t j = 0; j < letters_len; j++) {
             if (message[i] == letters[j]) {
-                out[i] = letters[mod((j - key), (int) letters_len)];
+                out[i] = letters[mod((int) j - key, (int) letters_len)];
                 break;
             }
         }
@@ -45,10 +42,9 @@ void CSR_decrypt(const char *message, int key, char *out) {
 }
 
 void CSR_enc_math(const char *message, int key, char *out) {
-
+    CSR_encrypt(message, key, out);
 }
 
 void CSR_dec_math(const char *message, int key, char *out) {
-
+    CSR_decrypt(message, key, out);
 }
-

@@ -4,8 +4,13 @@ build/
 
 # IDE
 .idea/
+.vscode/
+.claude/
 
 # compiled files
 *.exe
 *.o
 *.a
+
+# task description
+PROMPT.md
