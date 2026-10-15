@@ -10,10 +10,14 @@ add_compile_options(-Wall -Wextra)
 add_library(util STATIC src/util.c)
 target_include_directories(util PUBLIC include)
 
+add_library(expmod STATIC src/expmod.c)
+target_include_directories(expmod PUBLIC include)
+target_link_libraries(expmod PUBLIC util)
+
 add_executable(crypto
         src/main.c
         src/vars.c
         src/csr.c
         src/csk.c
         src/vgn.c)
-target_link_libraries(crypto PRIVATE util)
+target_link_libraries(crypto PRIVATE expmod util)

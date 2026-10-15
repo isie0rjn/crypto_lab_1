@@ -14,6 +14,7 @@
 
 #include "csk.h"
 #include "csr.h"
+#include "expmod.h"
 #include "util.h"
 #include "vars.h"
 #include "vgn.h"
@@ -41,6 +42,7 @@ struct multi_option {
 };
 
 static const struct multi_option multi_options[] = {
+    {"-ME", "-ME rlbe|lrbe|ml|swe A K N"},
     {NULL, NULL}
 };
 
@@ -116,6 +118,7 @@ static void usage(void) {
            "  -Ecskx | -Dcskx MESSAGE      Caesar with keyword, A-Z a-z 0-9\n"
            "  -Evgn  | -Dvgn  MESSAGE      Vigenere, A-Z\n"
            "  -Evgnx | -Dvgnx MESSAGE      Vigenere, A-Z a-z 0-9 and signs\n"
+           "  -ME rlbe|lrbe|ml|swe A K N   A^K mod N\n"
            "  -h, --help                   this text\n"
            "keys are read from stdin after the prompt 'key: '\n",
            prog);
@@ -197,9 +200,51 @@ static int run_message(const char *option, const char *message) {
     return rc;
 }
 
+/* ---------- part 3: number theory ---------- */
+
+static int wrong_count(const struct multi_option *opt) {
+    fail(EXIT_COUNT, "wrong number of arguments for %s", opt->name);
+    fprintf(stderr, "usage: %s %s\n", prog, opt->usage);
+    return EXIT_COUNT;
+}
+
+static int get_u64(const char *s, uint64_t *v, int hex) {
+    if (parse_u64(s, v, hex) != 0)
+        return fail(EXIT_NUMBER, "invalid number: %s", s);
+    return 0;
+}
+
+static int run_expmod(const struct multi_option *opt, int argc, char *argv[]) {
+    uint64_t a, k, n, r;
+    int rc;
+
+    if (argc != 6)
+        return wrong_count(opt);
+    const char *method = argv[2];
+    if ((rc = get_u64(argv[3], &a, 0)) != 0 || (rc = get_u64(argv[4], &k, 0)) != 0
+        || (rc = get_u64(argv[5], &n, 0)) != 0)
+        return rc;
+    if (n == 0)
+        return fail(EXIT_NUMBER, "invalid number: %s (modulus must be positive)", argv[5]);
+
+    if (strcmp(method, "rlbe") == 0)
+        r = EXP_rtl(a, k, n);
+    else if (strcmp(method, "lrbe") == 0)
+        r = EXP_ltr(a, k, n);
+    else if (strcmp(method, "ml") == 0)
+        r = EXP_ladder(a, k, n);
+    else if (strcmp(method, "swe") == 0)
+        r = EXP_window(a, k, n, 4);
+    else
+        return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, method);
+
+    printf("result: %llu\n", (unsigned long long) r);
+    return 0;
+}
+
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
-    (void) argc;
-    (void) argv;
+    if (strcmp(opt->name, "-ME") == 0)
+        return run_expmod(opt, argc, argv);
     return fail(EXIT_ILLEGAL, "illegal option: %s", opt->name);
 }
 
