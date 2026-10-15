@@ -13,6 +13,7 @@
 #include <unistd.h>
 #endif
 
+#include "attack.h"
 #include "csk.h"
 #include "csr.h"
 #include "expmod.h"
@@ -21,6 +22,7 @@
 #include "logdis.h"
 #include "util.h"
 #include "vars.h"
+#include "vgb.h"
 #include "vgn.h"
 
 enum {
@@ -32,12 +34,15 @@ enum {
     EXIT_ALGO = 6
 };
 
+#define MAX_PERIOD_KPA 64
+
 static char prog[64] = "crypto";
 
 static const char *const msg_options[] = {
     "-Ecsr", "-Dcsr", "-Ecsrm", "-Dcsrm",
     "-Ecsk", "-Dcsk", "-Ecskx", "-Dcskx",
-    "-Evgn", "-Dvgn", "-Evgnx", "-Dvgnx"
+    "-Evgn", "-Dvgn", "-Evgnx", "-Dvgnx",
+    "-Evgns", "-Dvgns", "-Evgb", "-Dvgb"
 };
 
 struct multi_option {
@@ -51,6 +56,9 @@ static const struct multi_option multi_options[] = {
     {"-MI", "-MI eea|ferma|gcd B N"},
     {"-DL", "-DL br|bsgs|pollard|ph|ic A B P"},
     {"-Dl", "-Dl br|bsgs|pollard|ph|ic A B P"},
+    {"-ATK", "-ATK coa CIPHER  |  -ATK kpa PLAIN CIPHER  |  -ATK seed CIPHER"},
+    {"-Efvgb", "-Efvgb IN OUT"},
+    {"-Dfvgb", "-Dfvgb IN OUT"},
     {NULL, NULL}
 };
 
@@ -126,15 +134,22 @@ static void usage(void) {
            "  -Ecskx | -Dcskx MESSAGE      Caesar with keyword, A-Z a-z 0-9\n"
            "  -Evgn  | -Dvgn  MESSAGE      Vigenere, A-Z\n"
            "  -Evgnx | -Dvgnx MESSAGE      Vigenere, A-Z a-z 0-9 and signs\n"
+           "  -Evgns | -Dvgns MESSAGE      Vigenere with seed, A-Z\n"
+           "  -Evgb  | -Dvgb  MESSAGE      Vigenere with XOR, ciphertext in hex\n"
+           "  -Efvgb | -Dfvgb IN OUT       Vigenere with XOR for files\n"
            "  -GF pm|poly|tbl A B          A*B in GF(2^8), hex\n"
            "  -GF inv A                    A^-1 in GF(2^8), hex\n"
            "  -ME rlbe|lrbe|ml|swe A K N   A^K mod N\n"
            "  -MI eea|ferma|gcd B N        B^-1 mod N\n"
            "  -DL br|bsgs|pollard|ph|ic A B P\n"
            "                               x: A^x = B (mod P)\n"
+           "  -ATK coa CIPHER              ciphertext-only attack on seeded Vigenere\n"
+           "  -ATK kpa PLAIN CIPHER        known-plaintext attack on seeded Vigenere\n"
+           "  -ATK seed CIPHER             seed brute force with a known key\n"
            "  -BENCH                       timing of all GF, EXP, INV and DL methods\n"
            "  -h, --help                   this text\n"
-           "keys are read from stdin after the prompt 'key: '\n",
+           "keys and seeds are read from stdin after the prompts 'key: ' and 'seed: ';\n"
+           "an empty seed on encryption means the current time\n",
            prog);
 }
 
@@ -161,10 +176,33 @@ static int read_word_key(char *key, size_t size, int (*check)(const char *, int)
     return 0;
 }
 
+static int read_any_key(char *key, size_t size) {
+    if (read_line("key: ", key, size) != 0 || key[0] == '\0')
+        return fail(EXIT_NUMBER, "no key given");
+    return 0;
+}
+
+static int read_seed(uint64_t *seed, int allow_empty) {
+    char line[64];
+
+    if (read_line("seed: ", line, sizeof line) != 0 || line[0] == '\0') {
+        if (!allow_empty)
+            return fail(EXIT_NUMBER, "no seed given");
+        *seed = (uint64_t) time(NULL);
+        printf("seed: %llu\n", (unsigned long long) *seed);
+        return 0;
+    }
+    if (parse_u64(line, seed, 0) != 0)
+        return fail(EXIT_NUMBER, "invalid number: %s", line);
+    return 0;
+}
+
 static int run_message(const char *option, const char *message) {
-    size_t out_size = strlen(message) + 1;
+    /* hex у VGB вдвое длиннее сообщения */
+    size_t out_size = 2 * strlen(message) + 1;
     char *out = malloc(out_size);
     char key[256];
+    uint64_t seed = 0;
     int rc = 0;
     int shift = 0;
 
@@ -207,6 +245,28 @@ static int run_message(const char *option, const char *message) {
             else
                 VGN_decrypt(message, key, extended, out);
             printf("%s: %s\n", encrypt ? "enc" : "dec", out);
+        }
+    } else if (strcmp(option, "-Evgns") == 0 || strcmp(option, "-Dvgns") == 0) {
+        int encrypt = option[1] == 'E';
+        if ((rc = read_word_key(key, sizeof key, VGN_check_key, 0)) == 0
+            && (rc = read_seed(&seed, encrypt)) == 0) {
+            if (encrypt)
+                VGN_encrypt_seed(message, key, seed, out);
+            else
+                VGN_decrypt_seed(message, key, seed, out);
+            printf("%s: %s\n", encrypt ? "enc" : "dec", out);
+        }
+    } else if (strcmp(option, "-Evgb") == 0 || strcmp(option, "-Dvgb") == 0) {
+        int encrypt = option[1] == 'E';
+        if ((rc = read_any_key(key, sizeof key)) == 0 && (rc = read_seed(&seed, encrypt)) == 0) {
+            if (encrypt) {
+                VGB_encrypt(message, key, seed, out);
+                printf("enc: %s\n", out);
+            } else if (VGB_decrypt(message, key, seed, out) == NULL) {
+                rc = fail(EXIT_NUMBER, "invalid hex: %s", message);
+            } else {
+                printf("dec: %s\n", out);
+            }
         }
     }
 
@@ -387,6 +447,149 @@ static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
     return 0;
 }
 
+/* ---------- case studies: attacks (3.8), files for VGB (4.1) ---------- */
+
+static void print_head(const char *label, const char *text, size_t max) {
+    size_t len = strlen(text);
+
+    printf("%s%.*s%s\n", label, (int) (len < max ? len : max), text, len > max ? "..." : "");
+}
+
+static void attack_report(const char *cipher) {
+    char *plain = malloc(strlen(cipher) + 1);
+    char eff_key[32];
+
+    if (plain == NULL)
+        return;
+    int letters_count = ATK_letter_count(cipher);
+    int kasiski = ATK_kasiski(cipher, 16);
+    printf("letters: %d\n", letters_count);
+    if (kasiski > 0)
+        printf("kasiski: period %d\n", kasiski);
+    else
+        printf("kasiski: no repeated trigrams\n");
+    int period = ATK_ciphertext_only(cipher, eff_key, plain);
+    if (period < 0) {
+        printf("too few letters for the attack\n");
+        free(plain);
+        return;
+    }
+    printf("period (ioc): %d, ioc = %.4f\n", period, ATK_ioc(cipher, period));
+    printf("effective key: %s\n", eff_key);
+    print_head("plain: ", plain, 70);
+    free(plain);
+}
+
+static int run_attack(const struct multi_option *opt, int argc, char *argv[]) {
+    if (argc < 3)
+        return wrong_count(opt);
+    const char *mode = argv[2];
+
+    if (strcmp(mode, "kpa") == 0) {
+        if (argc != 5)
+            return wrong_count(opt);
+        const char *plain = argv[3];
+        const char *cipher = argv[4];
+        char eff_key[MAX_PERIOD_KPA + 1];
+        int period = ATK_known_plaintext(plain, cipher, eff_key, MAX_PERIOD_KPA);
+        if (period == -1)
+            return fail(EXIT_ALGO, "plain and cipher have a different number of letters");
+        if (period < 0)
+            return fail(EXIT_ALGO, "no period up to %d found, not a Vigenere ciphertext?", MAX_PERIOD_KPA);
+        printf("period: %d\n", period);
+        printf("effective key: %s\n", eff_key);
+        printf("effective key = key + (seed mod 26), every pair below gives the same ciphertext:\n");
+        int len = (int) strlen(letters);
+        for (int s = 0; s < len; s++) {
+            char key[MAX_PERIOD_KPA + 1];
+            for (int j = 0; j < period; j++)
+                key[j] = letters[mod_int(alpha_index(letters, eff_key[j]) - s, len)];
+            key[period] = '\0';
+            printf("  seed mod 26 = %2d -> key %s\n", s, key);
+        }
+        return 0;
+    }
+    if (argc != 4)
+        return wrong_count(opt);
+    const char *cipher = argv[3];
+
+    if (strcmp(mode, "coa") == 0) {
+        attack_report(cipher);
+        if (ATK_letter_count(cipher) < 200)
+            printf("note: %d letters is too short for reliable statistics, the result is a guess\n",
+                   ATK_letter_count(cipher));
+
+        /* демонстрация на длинном тексте с известными ключом и seed */
+        const char *sample = ATK_sample();
+        char *sample_cipher = malloc(strlen(sample) + 1);
+        if (sample_cipher == NULL)
+            return fail(EXIT_ALGO, "out of memory");
+        VGN_encrypt_seed(sample, "MTIME", 1644485555u, sample_cipher);
+        printf("\ndemo: built-in English sample, key MTIME, seed 1644485555 (expected effective key XETXP)\n");
+        print_head("cipher: ", sample_cipher, 70);
+        attack_report(sample_cipher);
+        free(sample_cipher);
+        return 0;
+    }
+    if (strcmp(mode, "seed") == 0) {
+        char key[256];
+        uint64_t residues[3];
+        int rc;
+        if ((rc = read_word_key(key, sizeof key, VGN_check_key, 0)) != 0)
+            return rc;
+        char *plain = malloc(strlen(cipher) + 1);
+        if (plain == NULL)
+            return fail(EXIT_ALGO, "out of memory");
+        if (ATK_seed_bruteforce(cipher, key, residues, plain) < 0) {
+            free(plain);
+            return fail(EXIT_ALGO, "no letters in the ciphertext");
+        }
+        for (int i = 0; i < 3; i++) {
+            VGN_decrypt_seed(cipher, key, residues[i], plain);
+            printf("rank %d: seed mod 26 = %2llu, chi2 = %8.1f, plain: %s\n", i + 1,
+                   (unsigned long long) residues[i], ATK_chi2(plain), plain);
+        }
+        printf("result: %llu\n", (unsigned long long) residues[0]);
+        free(plain);
+        return 0;
+    }
+    return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, mode);
+}
+
+static int run_vgb_file(const struct multi_option *opt, int argc, char *argv[]) {
+    char key[256];
+    uint64_t seed = 0;
+    int rc;
+
+    if (argc != 4)
+        return wrong_count(opt);
+    const char *in_path = argv[2];
+    const char *out_path = argv[3];
+    int encrypt = opt->name[1] == 'E';
+    if (strcmp(in_path, out_path) == 0)
+        return fail(EXIT_ALGO, "input and output must be different files");
+    if ((rc = read_any_key(key, sizeof key)) != 0)
+        return rc;
+    if (encrypt && (rc = read_seed(&seed, 1)) != 0)
+        return rc;
+
+    int code = encrypt ? VGB_encrypt_file(in_path, out_path, key, seed)
+                       : VGB_decrypt_file(in_path, out_path, key);
+    switch (code) {
+    case 0:
+        printf("result: %s -> %s (%s)\n", in_path, out_path, encrypt ? "encrypted" : "decrypted");
+        return 0;
+    case -1:
+        return fail(EXIT_ALGO, "cannot open input file: %s", in_path);
+    case -2:
+        return fail(EXIT_ALGO, "cannot open output file: %s", out_path);
+    case -5:
+        return fail(EXIT_ALGO, "input file is too short, no seed header");
+    default:
+        return fail(EXIT_ALGO, "read/write error");
+    }
+}
+
 /* ---------- benchmark ---------- */
 
 /* volatile на входах и на выходе, чтобы вызовы не выкинул и не вынес из цикла оптимизатор */
@@ -491,6 +694,10 @@ static int run_bench(void) {
 }
 
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
+    if (strcmp(opt->name, "-ATK") == 0)
+        return run_attack(opt, argc, argv);
+    if (strcmp(opt->name, "-Efvgb") == 0 || strcmp(opt->name, "-Dfvgb") == 0)
+        return run_vgb_file(opt, argc, argv);
     if (strcmp(opt->name, "-DL") == 0 || strcmp(opt->name, "-Dl") == 0)
         return run_logdis(opt, argc, argv);
     if (strcmp(opt->name, "-GF") == 0)

@@ -33,7 +33,9 @@ add_executable(crypto
         src/csr.c
         src/csk.c
         src/vgn.c
-        src/gf.c)
+        src/vgb.c
+        src/gf.c
+        src/attack.c)
 target_link_libraries(crypto PRIVATE logdis util)
 
 # примеры 3.5.1-3.5.3 из методички, собираются как есть

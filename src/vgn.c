@@ -56,3 +56,12 @@ char *VGN_encrypt(const char *message, const char *key, int extended, char *out)
 char *VGN_decrypt(const char *message, const char *key, int extended, char *out) {
     return vgn_run(message, key, pick_alphabet(extended), 0, -1, out);
 }
+
+/* seed сдвигает каждую букву ключа на seed mod 26 - по сути это другой ключ той же длины */
+char *VGN_encrypt_seed(const char *message, const char *key, uint64_t seed, char *out) {
+    return vgn_run(message, key, letters, (int) (seed % strlen(letters)), 1, out);
+}
+
+char *VGN_decrypt_seed(const char *message, const char *key, uint64_t seed, char *out) {
+    return vgn_run(message, key, letters, (int) (seed % strlen(letters)), -1, out);
+}
