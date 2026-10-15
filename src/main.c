@@ -15,6 +15,7 @@
 #include "csk.h"
 #include "csr.h"
 #include "expmod.h"
+#include "invmod.h"
 #include "util.h"
 #include "vars.h"
 #include "vgn.h"
@@ -43,6 +44,7 @@ struct multi_option {
 
 static const struct multi_option multi_options[] = {
     {"-ME", "-ME rlbe|lrbe|ml|swe A K N"},
+    {"-MI", "-MI eea|ferma|gcd B N"},
     {NULL, NULL}
 };
 
@@ -119,6 +121,7 @@ static void usage(void) {
            "  -Evgn  | -Dvgn  MESSAGE      Vigenere, A-Z\n"
            "  -Evgnx | -Dvgnx MESSAGE      Vigenere, A-Z a-z 0-9 and signs\n"
            "  -ME rlbe|lrbe|ml|swe A K N   A^K mod N\n"
+           "  -MI eea|ferma|gcd B N        B^-1 mod N\n"
            "  -h, --help                   this text\n"
            "keys are read from stdin after the prompt 'key: '\n",
            prog);
@@ -242,9 +245,54 @@ static int run_expmod(const struct multi_option *opt, int argc, char *argv[]) {
     return 0;
 }
 
+static int inv_error(int code) {
+    switch (code) {
+    case -1:
+        return fail(EXIT_ALGO, "inverse does not exist (gcd != 1)");
+    case -2:
+        return fail(EXIT_ALGO, "modulus is not prime, fermat method is not applicable");
+    case -3:
+        return fail(EXIT_ALGO, "binary method needs an odd modulus");
+    case -4:
+        return fail(EXIT_NUMBER, "modulus must be >= 2");
+    default:
+        return fail(EXIT_ALGO, "unknown error %d", code);
+    }
+}
+
+static int run_invmod(const struct multi_option *opt, int argc, char *argv[]) {
+    int64_t b, n, inv = 0;
+    int code;
+
+    if (argc != 5)
+        return wrong_count(opt);
+    const char *method = argv[2];
+    if (parse_i64(argv[3], &b) != 0)
+        return fail(EXIT_NUMBER, "invalid number: %s", argv[3]);
+    if (parse_i64(argv[4], &n) != 0)
+        return fail(EXIT_NUMBER, "invalid number: %s", argv[4]);
+
+    if (strcmp(method, "eea") == 0)
+        code = INV_eea_trace(b, n, &inv, stdout);
+    else if (strcmp(method, "ferma") == 0)
+        code = INV_fermat(b, n, &inv);
+    else if (strcmp(method, "gcd") == 0)
+        code = INV_binary(b, n, &inv);
+    else
+        return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, method);
+
+    if (code != 0)
+        return inv_error(code);
+    printf("result: %lld\n", (long long) inv);
+    printf("%lld * %lld === 1 (mod %lld)\n", (long long) b, (long long) inv, (long long) n);
+    return 0;
+}
+
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
     if (strcmp(opt->name, "-ME") == 0)
         return run_expmod(opt, argc, argv);
+    if (strcmp(opt->name, "-MI") == 0)
+        return run_invmod(opt, argc, argv);
     return fail(EXIT_ILLEGAL, "illegal option: %s", opt->name);
 }
 
