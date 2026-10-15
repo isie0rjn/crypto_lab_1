@@ -7,8 +7,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 add_compile_options(-Wall -Wextra)
 
+add_library(util STATIC src/util.c)
+target_include_directories(util PUBLIC include)
+
 add_executable(crypto
         src/main.c
         src/vars.c
         src/csr.c)
-target_include_directories(crypto PRIVATE include)
+target_link_libraries(crypto PRIVATE util)
