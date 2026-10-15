@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -131,6 +132,7 @@ static void usage(void) {
            "  -MI eea|ferma|gcd B N        B^-1 mod N\n"
            "  -DL br|bsgs|pollard|ph|ic A B P\n"
            "                               x: A^x = B (mod P)\n"
+           "  -BENCH                       timing of all GF, EXP, INV and DL methods\n"
            "  -h, --help                   this text\n"
            "keys are read from stdin after the prompt 'key: '\n",
            prog);
@@ -164,7 +166,7 @@ static int run_message(const char *option, const char *message) {
     char *out = malloc(out_size);
     char key[256];
     int rc = 0;
-    int shift;
+    int shift = 0;
 
     if (out == NULL)
         return fail(EXIT_ALGO, "out of memory");
@@ -385,6 +387,109 @@ static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
     return 0;
 }
 
+/* ---------- benchmark ---------- */
+
+/* volatile на входах и на выходе, чтобы вызовы не выкинул и не вынес из цикла оптимизатор */
+static volatile uint64_t bench_sink;
+static volatile uint8_t gf_a = 0x57, gf_b = 0x83, gf_c = 0x53;
+static volatile uint64_t exp_vec[4][3] = {
+    {15, 4947, 31}, {7181, 2953, 9286}, {5617, 1234, 9627}, {4, 13, 497}
+};
+static volatile int64_t inv_vec[3][2] = {{7, 11}, {3, 11}, {1777, 2699}};
+static volatile uint64_t dl_vec[2][3] = {{31, 3, 29}, {2, 22, 29}};
+
+static void bench_gf_pm(void) { bench_sink += GF_mul_peasant(gf_a, gf_b); }
+static void bench_gf_poly(void) { bench_sink += GF_mul_poly(gf_a, gf_b); }
+static void bench_gf_tbl(void) { bench_sink += GF_mul_table(gf_a, gf_b); }
+static void bench_gf_inv(void) { bench_sink += GF_inv(gf_c); }
+
+#define BENCH_EXP(name, call)                                          \
+    static void name(void) {                                           \
+        for (int i = 0; i < 4; i++) {                                  \
+            uint64_t b = exp_vec[i][0], e = exp_vec[i][1], m = exp_vec[i][2]; \
+            bench_sink += call;                                        \
+        }                                                              \
+    }
+BENCH_EXP(bench_exp_rtl, EXP_rtl(b, e, m))
+BENCH_EXP(bench_exp_ltr, EXP_ltr(b, e, m))
+BENCH_EXP(bench_exp_ladder, EXP_ladder(b, e, m))
+BENCH_EXP(bench_exp_window, EXP_window(b, e, m, 4))
+
+#define BENCH_INV(name, fn)                                            \
+    static void name(void) {                                           \
+        for (int i = 0; i < 3; i++) {                                  \
+            int64_t r = 0;                                             \
+            fn(inv_vec[i][0], inv_vec[i][1], &r);                      \
+            bench_sink += (uint64_t) r;                                \
+        }                                                              \
+    }
+BENCH_INV(bench_inv_eea, INV_eea)
+BENCH_INV(bench_inv_fermat, INV_fermat)
+BENCH_INV(bench_inv_binary, INV_binary)
+
+#define BENCH_DL(name, fn)                                             \
+    static void name(void) {                                           \
+        for (int i = 0; i < 2; i++) {                                  \
+            uint64_t r = 0;                                            \
+            fn(dl_vec[i][0], dl_vec[i][1], dl_vec[i][2], &r);          \
+            bench_sink += r;                                           \
+        }                                                              \
+    }
+BENCH_DL(bench_dl_brute, DL_brute)
+BENCH_DL(bench_dl_bsgs, DL_bsgs)
+BENCH_DL(bench_dl_rho, DL_rho)
+BENCH_DL(bench_dl_ph, DL_ph)
+BENCH_DL(bench_dl_ic, DL_ic)
+
+struct bench_case {
+    const char *module;
+    const char *method;
+    void (*fn)(void);
+    int calls;      /* вызовов метода за один fn() */
+};
+
+static const struct bench_case bench_cases[] = {
+    {"GF", "pm", bench_gf_pm, 1},
+    {"GF", "poly", bench_gf_poly, 1},
+    {"GF", "tbl", bench_gf_tbl, 1},
+    {"GF", "inv", bench_gf_inv, 1},
+    {"EXP", "rlbe", bench_exp_rtl, 4},
+    {"EXP", "lrbe", bench_exp_ltr, 4},
+    {"EXP", "ml", bench_exp_ladder, 4},
+    {"EXP", "swe", bench_exp_window, 4},
+    {"INV", "eea", bench_inv_eea, 3},
+    {"INV", "ferma", bench_inv_fermat, 3},
+    {"INV", "gcd", bench_inv_binary, 3},
+    {"DL", "br", bench_dl_brute, 2},
+    {"DL", "bsgs", bench_dl_bsgs, 2},
+    {"DL", "pollard", bench_dl_rho, 2},
+    {"DL", "ph", bench_dl_ph, 2},
+    {"DL", "ic", bench_dl_ic, 2},
+};
+
+/* число повторов удваивается, пока один замер не займёт хотя бы 100 мс */
+static int run_bench(void) {
+    printf("%-8s %-8s %12s %10s %12s\n", "module", "method", "iterations", "total_ms", "ns_per_call");
+    for (size_t c = 0; c < sizeof bench_cases / sizeof bench_cases[0]; c++) {
+        const struct bench_case *bc = &bench_cases[c];
+        long iters = 1;
+        clock_t spent;
+        for (;;) {
+            clock_t start = clock();
+            for (long i = 0; i < iters; i++)
+                bc->fn();
+            spent = clock() - start;
+            if ((double) spent * 1000.0 / CLOCKS_PER_SEC >= 100.0 || iters >= (1L << 30))
+                break;
+            iters *= 2;
+        }
+        double ms = (double) spent * 1000.0 / CLOCKS_PER_SEC;
+        double calls = (double) iters * bc->calls;
+        printf("%-8s %-8s %12.0f %10.1f %12.1f\n", bc->module, bc->method, calls, ms, ms * 1e6 / calls);
+    }
+    return 0;
+}
+
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
     if (strcmp(opt->name, "-DL") == 0 || strcmp(opt->name, "-Dl") == 0)
         return run_logdis(opt, argc, argv);
@@ -409,6 +514,8 @@ int main(int argc, char *argv[]) {
         usage();
         return 0;
     }
+    if (strcmp(option, "-BENCH") == 0)
+        return run_bench();
     if (argc == 2) {
         if (option[0] == '-')
             return fail(EXIT_NO_ARG, "no message");
