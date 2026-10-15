@@ -15,6 +15,7 @@
 #include "csk.h"
 #include "csr.h"
 #include "expmod.h"
+#include "gf.h"
 #include "invmod.h"
 #include "util.h"
 #include "vars.h"
@@ -43,6 +44,7 @@ struct multi_option {
 };
 
 static const struct multi_option multi_options[] = {
+    {"-GF", "-GF pm|poly|tbl A B  or  -GF inv A  (A, B in hex)"},
     {"-ME", "-ME rlbe|lrbe|ml|swe A K N"},
     {"-MI", "-MI eea|ferma|gcd B N"},
     {NULL, NULL}
@@ -120,6 +122,8 @@ static void usage(void) {
            "  -Ecskx | -Dcskx MESSAGE      Caesar with keyword, A-Z a-z 0-9\n"
            "  -Evgn  | -Dvgn  MESSAGE      Vigenere, A-Z\n"
            "  -Evgnx | -Dvgnx MESSAGE      Vigenere, A-Z a-z 0-9 and signs\n"
+           "  -GF pm|poly|tbl A B          A*B in GF(2^8), hex\n"
+           "  -GF inv A                    A^-1 in GF(2^8), hex\n"
            "  -ME rlbe|lrbe|ml|swe A K N   A^K mod N\n"
            "  -MI eea|ferma|gcd B N        B^-1 mod N\n"
            "  -h, --help                   this text\n"
@@ -217,6 +221,51 @@ static int get_u64(const char *s, uint64_t *v, int hex) {
     return 0;
 }
 
+static int get_byte(const char *s, uint8_t *v) {
+    uint64_t x;
+
+    if (parse_u64(s, &x, 1) != 0 || x > 0xFF)
+        return fail(EXIT_NUMBER, "invalid number: %s", s);
+    *v = (uint8_t) x;
+    return 0;
+}
+
+static int run_gf(const struct multi_option *opt, int argc, char *argv[]) {
+    uint8_t a, b, r;
+    int rc;
+
+    if (argc < 4)
+        return wrong_count(opt);
+    const char *method = argv[2];
+
+    if (strcmp(method, "inv") == 0) {
+        if (argc != 4)
+            return wrong_count(opt);
+        if ((rc = get_byte(argv[3], &a)) != 0)
+            return rc;
+        r = GF_inv(a);
+        printf("result: 0x%02X\n", r);
+        if (a != 0)
+            printf("check: 0x%02X * 0x%02X = 0x%02X\n", a, r, GF_mul_peasant(a, r));
+        return 0;
+    }
+
+    if (strcmp(method, "pm") != 0 && strcmp(method, "poly") != 0 && strcmp(method, "tbl") != 0)
+        return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, method);
+    if (argc != 5)
+        return wrong_count(opt);
+    if ((rc = get_byte(argv[3], &a)) != 0 || (rc = get_byte(argv[4], &b)) != 0)
+        return rc;
+    if (strcmp(method, "pm") == 0)
+        r = GF_mul_peasant(a, b);
+    else if (strcmp(method, "poly") == 0)
+        r = GF_mul_poly(a, b);
+    else
+        r = GF_mul_table(a, b);
+    printf("result: 0x%02X\n", r);
+    return 0;
+}
+
 static int run_expmod(const struct multi_option *opt, int argc, char *argv[]) {
     uint64_t a, k, n, r;
     int rc;
@@ -289,6 +338,8 @@ static int run_invmod(const struct multi_option *opt, int argc, char *argv[]) {
 }
 
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
+    if (strcmp(opt->name, "-GF") == 0)
+        return run_gf(opt, argc, argv);
     if (strcmp(opt->name, "-ME") == 0)
         return run_expmod(opt, argc, argv);
     if (strcmp(opt->name, "-MI") == 0)

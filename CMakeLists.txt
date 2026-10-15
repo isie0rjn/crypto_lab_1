@@ -23,5 +23,6 @@ add_executable(crypto
         src/vars.c
         src/csr.c
         src/csk.c
-        src/vgn.c)
+        src/vgn.c
+        src/gf.c)
 target_link_libraries(crypto PRIVATE invmod util)
