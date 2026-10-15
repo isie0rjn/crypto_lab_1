@@ -102,6 +102,9 @@ static int read_line(const char *prompt, char *buf, size_t size) {
         return -1;
     }
     buf[strcspn(buf, "\r\n")] = '\0';
+    /* cmd в "echo 7 | crypto" передаёт пробел перед | */
+    for (size_t len = strlen(buf); len > 0 && (buf[len - 1] == ' ' || buf[len - 1] == '\t'); len--)
+        buf[len - 1] = '\0';
     /* powershell при перенаправлении может дописать BOM */
     if ((unsigned char) buf[0] == 0xEF && (unsigned char) buf[1] == 0xBB && (unsigned char) buf[2] == 0xBF)
         memmove(buf, buf + 3, strlen(buf + 3) + 1);
@@ -153,7 +156,7 @@ static void usage(void) {
            prog);
 }
 
-/* ---------- part 2: classical ciphers ---------- */
+/* ---------- часть 2: классические шифры ---------- */
 
 static int read_shift_key(int *key) {
     char line[128];
@@ -274,7 +277,7 @@ static int run_message(const char *option, const char *message) {
     return rc;
 }
 
-/* ---------- part 3: number theory ---------- */
+/* ---------- часть 3: теория чисел ---------- */
 
 static int wrong_count(const struct multi_option *opt) {
     fail(EXIT_COUNT, "wrong number of arguments for %s", opt->name);
@@ -447,7 +450,7 @@ static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
     return 0;
 }
 
-/* ---------- case studies: attacks (3.8), files for VGB (4.1) ---------- */
+/* ---------- разборы: атаки (3.8), файлы для VGB (4.1) ---------- */
 
 static void print_head(const char *label, const char *text, size_t max) {
     size_t len = strlen(text);
@@ -590,7 +593,7 @@ static int run_vgb_file(const struct multi_option *opt, int argc, char *argv[]) 
     }
 }
 
-/* ---------- benchmark ---------- */
+/* ---------- замер времени ---------- */
 
 /* volatile на входах и на выходе, чтобы вызовы не выкинул и не вынес из цикла оптимизатор */
 static volatile uint64_t bench_sink;
