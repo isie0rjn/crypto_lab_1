@@ -361,6 +361,8 @@ static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
         code = DL_rho(a, b, p, &x);
     else if (strcmp(method, "ph") == 0)
         code = DL_ph(a, b, p, &x);
+    else if (strcmp(method, "ic") == 0)
+        code = DL_ic(a, b, p, &x);
     else
         return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, method);
 
@@ -373,6 +375,8 @@ static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
     case -2:
         return fail(EXIT_ALGO, "invalid input: p must be prime, a and b nonzero mod p");
     default:
+        if (strcmp(method, "ic") == 0)
+            return fail(EXIT_ALGO, "method ic failed (it needs a primitive root as the base)");
         return fail(EXIT_ALGO, "method %s failed", method);
     }
     printf("result: %llu\n", (unsigned long long) x);

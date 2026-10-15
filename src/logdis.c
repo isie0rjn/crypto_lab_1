@@ -270,3 +270,193 @@ int DL_ph(uint64_t g, uint64_t h, uint64_t p, uint64_t *x) {
     }
     return finish(g, h, p, X, x);
 }
+
+#define IC_MAX_BASE 700
+#define IC_ATTEMPTS 10
+#define IC_PHASE2_TRIES 200000
+
+/* граница факторной базы растёт с длиной p */
+static uint64_t ic_bound(uint64_t p) {
+    uint64_t bits = 0;
+
+    for (uint64_t t = p; t != 0; t >>= 1)
+        bits++;
+    return (bits <= 16) ? 50 : bits * bits / 2;
+}
+
+static int ic_smooth(uint64_t y, const uint64_t *base, int nb, int *e) {
+    for (int i = 0; i < nb; i++) {
+        e[i] = 0;
+        while (y % base[i] == 0) {
+            y /= base[i];
+            e[i]++;
+        }
+    }
+    return y == 1;
+}
+
+/* Гаусс-Жордан по модулю q^e: пивот должен быть обратим, т.е. не делиться на q.
+   столбец без такого пивота пропускается, его значение в sol неверно и отсеется проверкой */
+static int ic_solve_mod(const int *ex, const uint64_t *rhs, int rows, int cols,
+                        uint64_t mod, uint64_t q, uint64_t *sol) {
+    size_t width = (size_t) cols + 1;
+    uint64_t *a = malloc((size_t) rows * width * sizeof *a);
+
+    if (a == NULL)
+        return -3;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++)
+            a[r * width + c] = (uint64_t) ex[(size_t) r * cols + c] % mod;
+        a[r * width + cols] = rhs[r] % mod;
+    }
+
+    int top = 0;
+    for (int c = 0; c < cols; c++) {
+        int piv = -1;
+        sol[c] = 0;
+        for (int r = top; r < rows; r++) {
+            if (a[r * width + c] % q != 0) {
+                piv = r;
+                break;
+            }
+        }
+        if (piv < 0)
+            continue;
+        if (piv != top) {
+            for (size_t k = 0; k < width; k++) {
+                uint64_t t = a[(size_t) piv * width + k];
+                a[(size_t) piv * width + k] = a[(size_t) top * width + k];
+                a[(size_t) top * width + k] = t;
+            }
+        }
+        uint64_t *prow = &a[(size_t) top * width];
+        uint64_t inv = inv_mod(prow[c], mod);
+        for (size_t k = 0; k < width; k++)
+            prow[k] = mul_mod(prow[k], inv, mod);
+        for (int r = 0; r < rows; r++) {
+            uint64_t *row = &a[(size_t) r * width];
+            uint64_t f = row[c];
+            if (r == top || f == 0)
+                continue;
+            for (size_t k = 0; k < width; k++)
+                row[k] = (row[k] + mod - mul_mod(f, prow[k], mod)) % mod;
+        }
+        /* пока только номер строки, значение снимем после полного прохода */
+        sol[c] = (uint64_t) top + 1;
+        top++;
+    }
+    for (int c = 0; c < cols; c++) {
+        if (sol[c] != 0)
+            sol[c] = a[(size_t) (sol[c] - 1) * width + cols];
+    }
+    free(a);
+    return 0;
+}
+
+/* логарифмы факторной базы; known[j] = 1, если log(p_j) найден и проверен.
+   0 - ok, -1 - не набралось соотношений, -3 - нет памяти */
+static int ic_phase1(uint64_t g, uint64_t p, const uint64_t *base, int nb, int rows,
+                     const uint64_t *pq, const int *pe, int pcount, uint64_t *logs, int *known) {
+    uint64_t n = p - 1;
+    int *ex = malloc((size_t) rows * nb * sizeof *ex);
+    uint64_t *rhs = malloc((size_t) rows * sizeof *rhs);
+    uint64_t *sol = malloc((size_t) nb * sizeof *sol);
+    int rc = 0;
+
+    if (ex == NULL || rhs == NULL || sol == NULL) {
+        rc = -3;
+        goto out;
+    }
+
+    /* соотношения k = sum e_j log(p_j) (mod p - 1) из гладких g^k */
+    int found = 0;
+    for (uint64_t tries = 0; found < rows && tries < (uint64_t) rows * 2000; tries++) {
+        uint64_t k = 1 + rand_below(n - 1);
+        if (ic_smooth(EXP_rtl(g, k, p), base, nb, &ex[(size_t) found * nb])) {
+            rhs[found] = k;
+            found++;
+        }
+    }
+    if (found < rows) {
+        rc = -1;
+        goto out;
+    }
+
+    /* решаем по модулю каждого q^e из p - 1 и склеиваем по КТО */
+    for (int c = 0; c < nb; c++)
+        logs[c] = 0;
+    uint64_t M = 1;
+    for (int i = 0; i < pcount; i++) {
+        uint64_t qe = 1;
+        for (int k = 0; k < pe[i]; k++)
+            qe *= pq[i];
+        if ((rc = ic_solve_mod(ex, rhs, rows, nb, qe, pq[i], sol)) != 0)
+            goto out;
+        for (int c = 0; c < nb; c++)
+            logs[c] = crt_add(logs[c], M, sol[c], qe);
+        M *= qe;
+    }
+    /* малые p: простое из базы может встретиться только как само g^k, и если такое k
+       не выпало, столбец вырожден - его логарифм просто не используем */
+    for (int c = 0; c < nb; c++)
+        known[c] = EXP_rtl(g, logs[c], p) == base[c];
+
+out:
+    free(ex);
+    free(rhs);
+    free(sol);
+    return rc;
+}
+
+int DL_ic(uint64_t g, uint64_t h, uint64_t p, uint64_t *x) {
+    uint64_t base[IC_MAX_BASE], logs[IC_MAX_BASE];
+    int e[IC_MAX_BASE], known[IC_MAX_BASE];
+    uint64_t pq[MAX_FACTORS];
+    int pe[MAX_FACTORS];
+    uint64_t n;
+    int rc = prepare(&g, &h, p, &n, x);
+
+    if (rc != 0)
+        return (rc < 0) ? rc : 0;
+    /* соотношения выводятся по модулю p - 1, это верно только для первообразного корня */
+    if (n != p - 1)
+        return -3;
+
+    uint64_t bound = ic_bound(p);
+    int nb = 0;
+    for (uint64_t q = 2; q <= bound && q < p && nb < IC_MAX_BASE; q++) {
+        if (is_prime_u64(q))
+            base[nb++] = q;
+    }
+    int pcount = factor_u64(n, pq, pe, MAX_FACTORS);
+    if (nb == 0 || pcount < 0)
+        return -3;
+
+    for (int attempt = 0; attempt < IC_ATTEMPTS; attempt++) {
+        /* если вторая фаза не удалась, повторяем первую с большим числом соотношений */
+        int rows = nb + 10 + attempt * (nb / 2 + 5);
+        rc = ic_phase1(g, p, base, nb, rows, pq, pe, pcount, logs, known);
+        if (rc == -3)
+            return -3;
+        if (rc != 0)
+            continue;
+
+        for (int t = 0; t < IC_PHASE2_TRIES / IC_ATTEMPTS; t++) {
+            uint64_t k = rand_below(n);
+            if (!ic_smooth(mul_mod(h, EXP_rtl(g, k, p), p), base, nb, e))
+                continue;
+            /* log h = sum e_j log(p_j) - k, годится только разложение по известным логарифмам */
+            uint64_t s = 0;
+            int usable = 1;
+            for (int j = 0; j < nb && usable; j++) {
+                if (e[j] != 0 && !known[j])
+                    usable = 0;
+                else
+                    s = (s + mul_mod((uint64_t) e[j], logs[j], n)) % n;
+            }
+            if (usable)
+                return finish(g, h, p, (s + n - k) % n, x);
+        }
+    }
+    return -3;
+}
