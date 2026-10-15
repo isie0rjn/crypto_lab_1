@@ -17,6 +17,7 @@
 #include "expmod.h"
 #include "gf.h"
 #include "invmod.h"
+#include "logdis.h"
 #include "util.h"
 #include "vars.h"
 #include "vgn.h"
@@ -47,6 +48,8 @@ static const struct multi_option multi_options[] = {
     {"-GF", "-GF pm|poly|tbl A B  or  -GF inv A  (A, B in hex)"},
     {"-ME", "-ME rlbe|lrbe|ml|swe A K N"},
     {"-MI", "-MI eea|ferma|gcd B N"},
+    {"-DL", "-DL br|bsgs|pollard|ph|ic A B P"},
+    {"-Dl", "-Dl br|bsgs|pollard|ph|ic A B P"},
     {NULL, NULL}
 };
 
@@ -126,6 +129,8 @@ static void usage(void) {
            "  -GF inv A                    A^-1 in GF(2^8), hex\n"
            "  -ME rlbe|lrbe|ml|swe A K N   A^K mod N\n"
            "  -MI eea|ferma|gcd B N        B^-1 mod N\n"
+           "  -DL br|bsgs|pollard|ph|ic A B P\n"
+           "                               x: A^x = B (mod P)\n"
            "  -h, --help                   this text\n"
            "keys are read from stdin after the prompt 'key: '\n",
            prog);
@@ -337,7 +342,48 @@ static int run_invmod(const struct multi_option *opt, int argc, char *argv[]) {
     return 0;
 }
 
+static int run_logdis(const struct multi_option *opt, int argc, char *argv[]) {
+    uint64_t a, b, p, x = 0;
+    int rc, code;
+
+    if (argc != 6)
+        return wrong_count(opt);
+    const char *method = argv[2];
+    if ((rc = get_u64(argv[3], &a, 0)) != 0 || (rc = get_u64(argv[4], &b, 0)) != 0
+        || (rc = get_u64(argv[5], &p, 0)) != 0)
+        return rc;
+
+    if (strcmp(method, "br") == 0)
+        code = DL_brute(a, b, p, &x);
+    else if (strcmp(method, "bsgs") == 0)
+        code = DL_bsgs(a, b, p, &x);
+    else if (strcmp(method, "pollard") == 0)
+        code = DL_rho(a, b, p, &x);
+    else if (strcmp(method, "ph") == 0)
+        code = DL_ph(a, b, p, &x);
+    else
+        return fail(EXIT_ILLEGAL, "illegal method for %s: %s", opt->name, method);
+
+    switch (code) {
+    case 0:
+        break;
+    case -1:
+        return fail(EXIT_ALGO, "no solution: %llu is not a power of %llu mod %llu",
+                    (unsigned long long) b, (unsigned long long) a, (unsigned long long) p);
+    case -2:
+        return fail(EXIT_ALGO, "invalid input: p must be prime, a and b nonzero mod p");
+    default:
+        return fail(EXIT_ALGO, "method %s failed", method);
+    }
+    printf("result: %llu\n", (unsigned long long) x);
+    printf("%llu ^ %llu === %llu (mod %llu)\n", (unsigned long long) a, (unsigned long long) x,
+           (unsigned long long) b, (unsigned long long) p);
+    return 0;
+}
+
 static int run_multi(const struct multi_option *opt, int argc, char *argv[]) {
+    if (strcmp(opt->name, "-DL") == 0 || strcmp(opt->name, "-Dl") == 0)
+        return run_logdis(opt, argc, argv);
     if (strcmp(opt->name, "-GF") == 0)
         return run_gf(opt, argc, argv);
     if (strcmp(opt->name, "-ME") == 0)

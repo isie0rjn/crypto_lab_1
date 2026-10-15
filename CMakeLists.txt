@@ -18,6 +18,10 @@ add_library(invmod STATIC src/invmod.c)
 target_include_directories(invmod PUBLIC include)
 target_link_libraries(invmod PUBLIC expmod util)
 
+add_library(logdis STATIC src/logdis.c)
+target_include_directories(logdis PUBLIC include)
+target_link_libraries(logdis PUBLIC invmod expmod util)
+
 add_executable(crypto
         src/main.c
         src/vars.c
@@ -25,4 +29,4 @@ add_executable(crypto
         src/csk.c
         src/vgn.c
         src/gf.c)
-target_link_libraries(crypto PRIVATE invmod util)
+target_link_libraries(crypto PRIVATE logdis util)
